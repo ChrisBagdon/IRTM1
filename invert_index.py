@@ -1,11 +1,12 @@
 import string
-
+from nltk import ngrams
 class Inv_index:
 
     # Initialize object with empty dicts for index and postings
     def __init__(self):
         self.ind = {}
         self.postings = {}
+        self.bi_ind = {}
 
     def index(self, filename):
         # Open file to process
@@ -43,14 +44,66 @@ class Inv_index:
                         self.postings[posting_id] = []
                         self.postings[posting_id].append(doc_id)
                         posting_id += 1
+                    # Add term's bigrams to bigram index
+                    for bigram in ngrams("$" + term + "$", 2):
+                        bigram = "".join([x for x in bigram])
+                        if bigram in self.bi_ind:
+                            if term not in self.bi_ind[bigram]:
+                                self.bi_ind[bigram].append(term)
+                        else:
+                            self.bi_ind[bigram] = []
+                            self.bi_ind[bigram].append(term)
+
 
     def query(self, text):
-        terms = text.lower().split(" ")
+        text = text.lower()
+        terms = text.split(" ")
         if len(terms) == 1:
             try:
-                return self.postings[self.ind[text.lower()][2]]  # return postings list for a single term query
+                # Check for wildcards. First edit query based on * position
+                if "*" in text:
+                    term_cans = []
+                    inner_wild = False
+                    # If query begins with and ends with *, simply remove start and end markers
+                    if text.startswith("*") and text.endswith("*"):
+                        wild_text = text[1:-1]
+                    # If query begins with * remove start of term marker
+                    elif text.startswith("*"):
+                        wild_text = text[1:]+"$"
+                    # If query ends with *, remove end marker
+                    elif text.endswith("*"):
+                        wild_text = "$"+ text[:-1]
+                    # If * is inside query, flag for skipping post processing
+                    else:
+                        ast = text.find("*")
+                        wild_text = "$" + text.replace("*","") + "$"
+                        inner_wild = True
+                    # Break query into bigrams
+                    for bigram in ngrams(wild_text, 2):
+                        bigram = "".join([x for x in bigram])
+                        # For first bigram create list of terms containing bigrams
+                        if len(term_cans) == 0:
+                            term_cans = self.bi_ind[bigram]
+                        # Intersect current list of terms with list of current bigram
+                        else:
+                            term_cans = [term for term in term_cans if term in self.bi_ind[bigram]]
+                    docs = []
+                    # Get docs containing terms
+                    for term_can in term_cans:
+                        # Post process terms
+                        if not inner_wild:
+                            # Check if query without * is within terms
+                            # Prevents returning "moon" when searching "mon*"
+                            if text.replace("*", "") not in term_can:
+                                continue
+                        for doc_id in self.postings[self.ind[term_can][2]]:
+                            docs.append(doc_id)
+                    return set(docs)
+                else:
+                    return self.postings[self.ind[text.lower()][2]]  # return postings list for a single term query
             except:
                 print(f"{text} could not be found in index")
+
         else:
             set_list = []
             for term in terms:
